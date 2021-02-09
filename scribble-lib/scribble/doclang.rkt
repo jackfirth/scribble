@@ -46,17 +46,17 @@
                  #`(doc-begin m-id post-process exprs body1 ... . body)]
                 [(id . rest)
                  (and (identifier? #'id)
-                      (ormap (lambda (kw) (free-identifier=? #'id kw))
-                             (syntax->list #'(require
-                                              provide
-                                              define-values
-                                              define-syntaxes
-                                              begin-for-syntax
-                                              module
-                                              module*
-                                              #%require
-                                              #%provide
-                                              #%declare))))
+                      (for/or ([kw (in-list (syntax->list #'(require
+                                                              provide
+                                                              define-values
+                                                              define-syntaxes
+                                                              begin-for-syntax
+                                                              module
+                                                              module*
+                                                              #%require
+                                                              #%provide
+                                                              #%declare)))])
+                        (free-identifier=? #'id kw)))
                  #`(begin #,expanded (doc-begin m-id post-process exprs . body))]
                 [_else
                  #`(doc-begin m-id post-process 

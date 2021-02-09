@@ -47,7 +47,9 @@
   ;; the low-level string output function (can change with `with-writer')
   (define write write-string)
   ;; to get the output column
-  (define (getcol) (let-values ([(line col pos) (port-next-location p)]) col))
+  (define (getcol)
+    (define-values (line col pos) (port-next-location p))
+    col)
   ;; total size of the two prefixes
   (define (2pfx-length pfx1 pfx2)
     (if (and pfx1 pfx2)
@@ -56,11 +58,14 @@
       0))
   ;; combines a prefix with a target column to get to
   (define (pfx+col pfx)
-    (and pfx (let ([col (getcol)])
-               (cond [(number? pfx) (max pfx col)]
-                     [(>= (string-length pfx) col) pfx]
-                     [else (string-append
-                            pfx (make-spaces (- col (string-length pfx))))]))))
+    (cond
+      [(not pfx) #f]
+      [else
+       (define col (getcol))
+       (cond [(number? pfx) (max pfx col)]
+             [(>= (string-length pfx) col) pfx]
+             [else (string-append
+                    pfx (make-spaces (- col (string-length pfx))))])]))
   ;; adds two prefixes
   (define (pfx+ pfx1 pfx2)
     (and pfx1 pfx2
@@ -73,56 +78,66 @@
     (define-syntax-rule (show pfx) ; optimize when not needed
       (unless (eq? pfx 0) (write (->str pfx) p)))
     (when (and pfx1 pfx2)
-      (if (eq? 0 col)
-        (begin (show pfx1) (show pfx2))
-        (let ([len1 (if (number? pfx1) pfx1 (string-length pfx1))])
-          (cond [(< col len1) (write (->str pfx1) p col) (show pfx2)]
-                [(= col len1) (show pfx2)]
-                [(eq? 0 pfx2)]
-                [else
-                 (let ([col (- col len1)]
-                       [len2 (if (number? pfx2) pfx2 (string-length pfx2))])
-                   (when (< col len2) (write (->str pfx2) p col)))])))))
+      (cond
+        [(eq? 0 col)
+         (show pfx1)
+         (show pfx2)]
+        [else
+         (define len1 (if (number? pfx1) pfx1 (string-length pfx1)))
+         (cond [(< col len1) (write (->str pfx1) p col) (show pfx2)]
+               [(= col len1) (show pfx2)]
+               [(eq? 0 pfx2)]
+               [else
+                (let ([col (- col len1)]
+                      [len2 (if (number? pfx2) pfx2 (string-length pfx2))])
+                  (when (< col len2) (write (->str pfx2) p col)))])])))
   ;; the basic printing unit: strings
   (define (output-string x)
     (define pfx (mcar pfxs))
-    (if (not pfx) ; prefix disabled?
-      (write x p)
-      (let ([len (string-length x)]
-            [nls (regexp-match-positions* #rx"\n" x)])
-        (let loop ([start 0] [nls nls] [lpfx (mcdr pfxs)] [col (getcol)])
-          (cond [(pair? nls)
-                 (define nl (car nls))
-                 (if (regexp-match? #rx"^ *$" x start (car nl))
-                   (newline p) ; only spaces before the end of the line
-                   (begin (output-pfx col pfx lpfx)
-                          (write x p start (cdr nl))))
-                 (loop (cdr nl) (cdr nls) 0 0)]
-                ;; last substring from here (always set lpfx state when done)
-                [(start . = . len)
-                 (set-mcdr! pfxs lpfx)]
-                [(col . > . (2pfx-length pfx lpfx))
-                 (set-mcdr! pfxs lpfx)
-                 ;; the prefix was already shown, no accumulation needed
-                 (write x p start)]
-                [else
-                 (define m (regexp-match-positions #rx"^ +" x start))
-                 ;; accumulate spaces to lpfx, display if it's not all spaces
-                 (define lpfx* (if m (pfx+ lpfx (- (cdar m) (caar m))) lpfx))
-                 (set-mcdr! pfxs lpfx*)
-                 (unless (and m (= len (cdar m)))
-                   (output-pfx col pfx lpfx*)
-                   ;; the spaces were already added to lpfx
-                   (write x p (if m (cdar m) start)))])))))
+    (cond
+      [(not pfx)
+       (write x p)]
+      [else
+       (define len (string-length x))
+       (define nls (regexp-match-positions* #rx"\n" x))
+       (let loop ([start 0] [nls nls] [lpfx (mcdr pfxs)] [col (getcol)])
+         (cond [(pair? nls)
+                (define nl (car nls))
+                (cond
+                  [(regexp-match? #rx"^ *$" x start (car nl))
+                   (newline p)]
+                  [else
+                   (output-pfx col pfx lpfx)
+                   (write x p start (cdr nl))])
+                (loop (cdr nl) (cdr nls) 0 0)]
+               ;; last substring from here (always set lpfx state when done)
+               [(start . = . len)
+                (set-mcdr! pfxs lpfx)]
+               [(col . > . (2pfx-length pfx lpfx))
+                (set-mcdr! pfxs lpfx)
+                ;; the prefix was already shown, no accumulation needed
+                (write x p start)]
+               [else
+                (define m (regexp-match-positions #rx"^ +" x start))
+                ;; accumulate spaces to lpfx, display if it's not all spaces
+                (define lpfx* (if m (pfx+ lpfx (- (cdar m) (caar m))) lpfx))
+                (set-mcdr! pfxs lpfx*)
+                (unless (and m (= len (cdar m)))
+                  (output-pfx col pfx lpfx*)
+                  ;; the spaces were already added to lpfx
+                  (write x p (if m (cdar m) start)))]))]))
   ;; blocks and splices
   (define (output-block c)
     (define pfx  (mcar pfxs))
     (define lpfx (mcdr pfxs))
     (define npfx (pfx+col (pfx+ pfx lpfx)))
     (set-mcar! pfxs npfx) (set-mcdr! pfxs 0)
-    (if (list? c)
-      (for ([c (in-list c)]) (loop c))
-      (begin (loop (car c)) (loop (cdr c))))
+    (cond
+      [(list? c)
+       (for ([c (in-list c)]) (loop c))]
+      [else
+       (loop (car c))
+       (loop (cdr c))])
     (set-mcar! pfxs pfx) (set-mcdr! pfxs lpfx))
   (define (output-splice c)
     (for-each loop c))
@@ -145,16 +160,20 @@
        (define c (special-contents x))
        (case (special-flag x)
          ;; preserve tailness & avoid `set!' for blocks/splices if possible
-         [(block) (if list=block?
-                    (output-block c)
-                    (begin (set! list=block? #t)
-                           (output-block c)
-                           (set! list=block? #f)))]
-         [(splice) (if list=block?
-                     (begin (set! list=block? #f)
-                            (output-splice c)
-                            (set! list=block? #t))
-                     (output-splice c))]
+         [(block) (cond
+                    [list=block?
+                     (output-block c)]
+                    [else
+                     (set! list=block? #t)
+                     (output-block c)
+                     (set! list=block? #f)])]
+         [(splice) (cond
+                     [list=block?
+                      (set! list=block? #f)
+                      (output-splice c)
+                      (set! list=block? #t)]
+                     [else
+                      (output-splice c)])]
          [(flush) ; useful before `disable-prefix'
           (output-pfx (getcol) (mcar pfxs) (mcdr pfxs))]
          [(disable-prefix) ; save the previous pfxs
@@ -251,7 +270,9 @@
 
 ;; special constructs
 
-(define-struct special (flag contents))
+(struct special (flag contents)
+  #:extra-constructor-name make-special
+  )
 
 (define-syntax define/provide-special
   (syntax-rules ()
@@ -292,12 +313,14 @@
 (define (add-newlines list #:sep [sep "\n"])
   (define r
     (let loop ([list list])
-      (if (null? list)
-        null
-        (let ([1st (car list)])
-          (if (or (not 1st) (void? 1st))
-            (loop (cdr list))
-            (list* sep 1st (loop (cdr list))))))))
+      (cond
+        [(null? list)
+         null]
+        [else
+         (define 1st (car list))
+         (if (or (not 1st) (void? 1st))
+             (loop (cdr list))
+             (list* sep 1st (loop (cdr list))))])))
   (if (null? r) r (cdr r)))
 
 (provide split-lines)
@@ -308,23 +331,5 @@
       [(equal? "\n" (car list)) (loop (cdr list) '() (cons (reverse cur) r))]
       [else (loop (cdr list) (cons (car list) cur) r)])))
 
-(define outputable/c
-  (lambda (v) #t)
-  ;; too expensive:
-  #;
-  (recursive-contract
-   (or/c void?
-         #f
-         null?
-         (cons/c outputable/c outputable/c)
-         (-> outputable/c)
-         promise?
-         (box/c outputable/c)
-         special?
-         string?
-         bytes?
-         symbol?
-         path?
-         keyword?
-         number?
-         char?)))
+(define (outputable/c v)
+  #t)

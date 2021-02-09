@@ -97,15 +97,16 @@
       (define extra-sz (integer-bytes->integer (get 2) #f #f))
       (define name (bytes->string/utf-8 (get name-sz) #\?))
       (skip extra-sz)
-      (if (equal? name "llncs.cls")
-          (call-with-output-file cls-file
-            (lambda (o)
-              (inflate i o)))
-          (begin
-            (skip sz)
-            (when data-desc?
-              skip 12)
-            (loop)))]
+      (cond
+        [(equal? name "llncs.cls")
+         (call-with-output-file cls-file
+           (lambda (o)
+             (inflate i o)))]
+        [else
+         (skip sz)
+         (when data-desc?
+           skip 12)
+         (loop)])]
      [else (error "didn't find file in archive")]))
   (close-input-port i)
   (delete-file z))

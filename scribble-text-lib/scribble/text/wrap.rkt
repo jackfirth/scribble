@@ -53,16 +53,17 @@
   (define (loop str strs width*)
     (define width (if (pair? width*) (car width*) width*))
     (define strlen (string-length str))
-    (define (do-word s1 w1 w2 s2) ; s1--spaces--w1--word--w2--spaces--s2
-      (define w1* (if (eq? 0 s1) 0 w1))       ;\ w1*..w2* includes spaces
-      (define w2* (if (eq? strlen s2) s2 w2)) ;/ for first/last word
+    (define (do-word s1 w1 w2 s2)
+      (define w1* (if (eq? 0 s1) 0 w1))
+      (define w2* (if (eq? strlen s2) s2 w2))
       (define word (substring str w1* w2*))
       (define-values [r1 r2 r3]
         (if split-word (split-word word (- width w1*)) (values #f word #t)))
-      (let* ([1st (cond [r1 (string-append (substring str 0 w1*) r1)]
-                        [(eq? w1* 0) #f]
-                        [else (substring str 0 s1)])]
-             [strs (if 1st (cons 1st strs) strs)]
+      (define 1st
+        (cond [r1 (string-append (substring str 0 w1*) r1)]
+              [(eq? w1* 0) #f]
+              [else (substring str 0 s1)]))
+      (let* ([strs (if 1st (cons 1st strs) strs)]
              [width* (cond [(not r1) width*]
                            [(pair? width*) (cdr width*)]
                            [else width*])]
@@ -73,11 +74,12 @@
              [strs (if 2nd (cons 2nd strs) strs)]
              [width* (cond [(not r2) width*]
                            [(pair? width*) (cdr width*)]
-                           [else width*])]
-             [rst (cond [(and (not 2nd) r2)
-                         (string-append r2 (substring str w2*))]
-                        [(eq? w2* strlen) #f]
-                        [else (substring str s2)])])
+                           [else width*])])
+        (define rst
+          (cond [(and (not 2nd) r2)
+                 (string-append r2 (substring str w2*))]
+                [(eq? w2* strlen) #f]
+                [else (substring str s2)]))
         (if rst (loop rst strs width*) (reverse strs))))
     (cond
       [(strlen . <= . width) (reverse (cons str strs))]

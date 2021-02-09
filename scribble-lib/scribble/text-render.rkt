@@ -35,28 +35,28 @@
              format-number)
 
     (define/override (render-part d ht)
-      (let ([number (collected-info-number (part-collected-info d ht))])
-        (unless (part-style? d 'hidden)
-          (let ([s (format-number number '() #t)])
-            (unless (null? s)
-              (printf "~a~a" 
-                      (car s)
-                      (if (part-title-content d)
-                          " "
-                          "")))
-            (when (part-title-content d)
-              (render-content (part-title-content d) d ht))
-            (when (or (pair? number) (part-title-content d))
-              (newline)
-              (newline))))
-        (render-flow (part-blocks d) d ht #f)
-        (let loop ([pos 1]
-                   [secs (part-parts d)]
-                   [need-newline? (pair? (part-blocks d))])
-          (unless (null? secs)
-            (when need-newline? (newline))
-            (render-part (car secs) ht)
-            (loop (add1 pos) (cdr secs) #t)))))
+      (define number (collected-info-number (part-collected-info d ht)))
+      (unless (part-style? d 'hidden)
+        (let ([s (format-number number '() #t)])
+          (unless (null? s)
+            (printf "~a~a" 
+                    (car s)
+                    (if (part-title-content d)
+                        " "
+                        "")))
+          (when (part-title-content d)
+            (render-content (part-title-content d) d ht))
+          (when (or (pair? number) (part-title-content d))
+            (newline)
+            (newline))))
+      (render-flow (part-blocks d) d ht #f)
+      (let loop ([pos 1]
+                 [secs (part-parts d)]
+                 [need-newline? (pair? (part-blocks d))])
+        (unless (null? secs)
+          (when need-newline? (newline))
+          (render-part (car secs) ht)
+          (loop (add1 pos) (cdr secs) #t))))
 
     (define/override (render-flow f part ht starting-item?)
       (if (null? f)
@@ -73,178 +73,184 @@
 
     (define/override (render-table i part ht inline?)
       (define flowss (table-blockss i))
-      (if (null? flowss)
-          null
-          (let* ([strs (map (lambda (flows)
-                              (map (lambda (d)
-                                     (if (eq? d 'cont)
-                                         d
-                                         (let ([o (open-output-string)])
-                                           (parameterize ([current-indent 0]
-                                                          [current-output-port o])
-                                             (render-block d part ht #f))
-                                           (regexp-split
-                                            #rx"\n"
-                                            (regexp-replace #rx"\n$" (get-output-string o) "")))))
-                                   flows))
-                            flowss)]
-                 [extract-align
-                  (lambda (s)
-                    (define p (style-properties s))
-                    (cond
-                     [(member 'right p) 'right]
-                     [(member 'center p) 'center]
-                     [else 'left]))]
-                 [alignss
-                  (cond
-                   [(ormap (lambda (v) (and (table-cells? v) v)) (style-properties (table-style i)))
-                    => (lambda (tc)
-                         (for/list ([l (in-list (table-cells-styless tc))])
-                           (for/list ([s (in-list l)])
-                             (extract-align s))))]
-                   [(ormap (lambda (v) (and (table-columns? v) v)) (style-properties (table-style i)))
-                    => (lambda (tc)
-                         (make-list
-                          (length flowss)
-                          (for/list ([s (in-list (table-columns-styles tc))])
-                            (extract-align s))))]
-                   [else
-                    (if (null? flowss)
-                        null
-                        (make-list (length flowss) (make-list (length (car flowss)) 'left)))])]
-                 [extract-border
-                  (lambda (s)
-                    (define p (style-properties s))
-                    (cond
-                     [(memq 'border p) '#(#t #t #t #t)]
-                     [else
-                      (vector (memq 'left-border p) (memq 'right-border p)
-                              (memq 'top-border p) (memq 'bottom-border p))]))]
-                 [borderss
-                  ;; A border is (vector left? right? top? bottom?)
-                  (cond
-                   [(ormap (lambda (v) (and (table-cells? v) v)) (style-properties (table-style i)))
-                    => (lambda (tc)
-                         (for/list ([l (in-list (table-cells-styless tc))])
-                           (for/list ([s (in-list l)])
-                             (extract-border s))))]
-                   [(ormap (lambda (v) (and (table-columns? v) v)) (style-properties (table-style i)))
-                    => (lambda (tc)
-                         (make-list
-                          (length flowss)
-                          (for/list ([s (in-list (table-columns-styles tc))])
-                            (extract-border s))))]
-                   [else
-                    (if (null? flowss)
-                        null
-                        (make-list (length flowss) (make-list (length (car flowss)) '#(#f #f #f #f))))])]
-                 [border-left? (lambda (v) (vector-ref v 0))]
-                 [border-right? (lambda (v) (vector-ref v 1))]
-                 [border-top? (lambda (v) (vector-ref v 2))]
-                 [border-bottom? (lambda (v) (vector-ref v 3))]
-                 [col-borders ; has only left and right
-                  (for/list ([i (in-range (length (car borderss)))])
-                    (for/fold ([v '#(#f #f)]) ([borders (in-list borderss)])
-                      (define v2 (list-ref borders i))
-                      (vector (or (border-left? v) (border-left? v2))
-                              (or (border-right? v) (border-right? v2)))))]
-                 [widths (map (lambda (col)
-                                (for/fold ([d 0]) ([i (in-list col)])
-                                  (if (eq? i 'cont)
-                                      d
-                                      (apply max d (map string-length i)))))
-                              (apply map list strs))]
-                 [x-length (lambda (col) (if (eq? col 'cont) 0 (length col)))])
+      (cond
+        [(null? flowss)
+         null]
+        [else
+         (define strs
+           (map (lambda (flows)
+                  (map (lambda (d)
+                         (cond
+                           [(eq? d 'cont)
+                            d]
+                           [else
+                            (define o (open-output-string))
+                            (parameterize ([current-indent 0]
+                                           [current-output-port o])
+                              (render-block d part ht #f))
+                            (regexp-split
+                             #rx"\n"
+                             (regexp-replace #rx"\n$" (get-output-string o) ""))]))
+                       flows))
+                flowss))
+         (define (extract-align s)
+           (define p (style-properties s))
+           (cond
+             [(member 'right p) 'right]
+             [(member 'center p) 'center]
+             [else 'left]))
+         (define alignss
+           (cond
+             [(for/first ([v (in-list (style-properties (table-style i)))] #:when (table-cells? v)) v)
+              => (lambda (tc)
+                   (for/list ([l (in-list (table-cells-styless tc))])
+                     (for/list ([s (in-list l)])
+                       (extract-align s))))]
+             [(for/first ([v (in-list (style-properties (table-style i)))] #:when (table-columns? v)) v)
+              => (lambda (tc)
+                   (make-list
+                    (length flowss)
+                    (for/list ([s (in-list (table-columns-styles tc))])
+                      (extract-align s))))]
+             [(null? flowss)
+              null]
+             [else
+              (make-list (length flowss) (make-list (length (car flowss)) 'left))]))
+         (define (extract-border s)
+           (define p (style-properties s))
+           (cond
+             [(memq 'border p) '#(#t #t #t #t)]
+             [else
+              (vector (memq 'left-border p) (memq 'right-border p)
+                      (memq 'top-border p) (memq 'bottom-border p))]))
+         (define borderss
+           (cond
+             [(for/first ([v (in-list (style-properties (table-style i)))] #:when (table-cells? v)) v)
+              => (lambda (tc)
+                   (for/list ([l (in-list (table-cells-styless tc))])
+                     (for/list ([s (in-list l)])
+                       (extract-border s))))]
+             [(for/first ([v (in-list (style-properties (table-style i)))] #:when (table-columns? v)) v)
+              => (lambda (tc)
+                   (make-list
+                    (length flowss)
+                    (for/list ([s (in-list (table-columns-styles tc))])
+                      (extract-border s))))]
+             [(null? flowss)
+              null]
+             [else
+              (make-list (length flowss) (make-list (length (car flowss)) '#(#f #f #f #f)))]))
+         (define (border-left? v)
+           (vector-ref v 0))
+         (define (border-right? v)
+           (vector-ref v 1))
+         (define (border-top? v)
+           (vector-ref v 2))
+         (define (border-bottom? v)
+           (vector-ref v 3))
+         (define col-borders
+           (for/list ([i (in-range (length (car borderss)))])
+             (for/fold ([v '#(#f #f)]) ([borders (in-list borderss)])
+               (define v2 (list-ref borders i))
+               (vector (or (border-left? v) (border-left? v2))
+                       (or (border-right? v) (border-right? v2))))))
+         (define widths
+           (map (lambda (col)
+                  (for/fold ([d 0]) ([i (in-list col)])
+                    (if (eq? i 'cont)
+                        d
+                        (apply max d (map string-length i)))))
+                (apply map list strs)))
+         (define (x-length col)
+           (if (eq? col 'cont) 0 (length col)))
+         (define (show-row-border prev-borders borders)
+           (when (for/or ([prev-border (in-list prev-borders)]
+                          [border (in-list borders)])
+                   (or (border-bottom? prev-border)
+                       (border-top? border)))
+             (define-values (end-h-border? end-v-border?)
+               (for/fold ([left-border? #f]
+                          [prev-border? #f])
+                         ([w (in-list widths)]
+                          [prev-border (in-list prev-borders)]
+                          [border (in-list borders)]
+                          [col-border (in-list col-borders)])
+                 (define border? (or (and prev-border (border-bottom? prev-border))
+                                     (border-top? border)))
+                 (when (or left-border? (border-left? col-border))
+                   (display (if (or prev-border? border?) "-" " ")))
+                 (display (make-string w (if border? #\- #\space)))
+                 (values (border-right? col-border) border?)))
+             (when end-h-border?
+               (display (if end-v-border? "-" " ")))
+             (newline)))
+         (define-values (last-indent? last-borders)
+           (for/fold ([indent? #f] [prev-borders #f]) ([row (in-list strs)]
+                                                       [aligns (in-list alignss)]
+                                                       [borders (in-list borderss)])
+             (values
+              (let ([h (apply max 0 (map x-length row))])
+                (define row*
+                  (for/list ([i (in-range h)])
+                    (for/list ([col (in-list row)])
+                      (cond
+                        [(i . < . (x-length col))
+                         (list-ref col i)]
+                        [(eq? col 'cont)
+                         'cont]
+                        [else ""]))))
+                (for/fold ([indent? indent?]) ([sub-row (in-list row*)]
+                                               [pos (in-naturals)])
+                  (when indent? (indent))
 
-            (define (show-row-border prev-borders borders)
-              (when (for/or ([prev-border (in-list prev-borders)]
-                             [border (in-list borders)])
-                      (or (border-bottom? prev-border)
-                          (border-top? border)))
-                (define-values (end-h-border? end-v-border?)
-                  (for/fold ([left-border? #f]
-                             [prev-border? #f])
-                      ([w (in-list widths)]
-                       [prev-border (in-list prev-borders)]
-                       [border (in-list borders)]
-                       [col-border (in-list col-borders)])
-                    (define border? (or (and prev-border (border-bottom? prev-border))
-                                        (border-top? border)))
-                    (when (or left-border? (border-left? col-border))
-                      (display (if (or prev-border? border?) "-" " ")))
-                    (display (make-string w (if border? #\- #\space)))
-                    (values (border-right? col-border) border?)))
-                (when end-h-border?
-                  (display (if end-v-border? "-" " ")))
-                (newline)))
+                  (when (zero? pos)
+                    (show-row-border (or prev-borders (map (lambda (b) '#(#f #f #f #f)) borders))
+                                     borders))
 
-            (define-values (last-indent? last-borders)
-              (for/fold ([indent? #f] [prev-borders #f]) ([row (in-list strs)]
-                                                          [aligns (in-list alignss)]
-                                                          [borders (in-list borderss)])
-                (values
-                 (let ([h (apply max 0 (map x-length row))])
-                   (let ([row* (for/list ([i (in-range h)])
-                                 (for/list ([col (in-list row)])
-                                   (if (i . < . (x-length col))
-                                       (list-ref col i)
-                                       (if (eq? col 'cont)
-                                           'cont
-                                           ""))))])
-                     (for/fold ([indent? indent?]) ([sub-row (in-list row*)]
-                                                    [pos (in-naturals)])
-                       (when indent? (indent))
-
-                       (when (zero? pos)
-                         (show-row-border (or prev-borders (map (lambda (b) '#(#f #f #f #f)) borders))
-                                          borders))
-
-                       (define-values (end-border? end-col-border?)
-                         (for/fold ([left-border? #f] [left-col-border? #f])
-                             ([col (in-list sub-row)]
-                              [w (in-list widths)]
-                              [align (in-list aligns)]
-                              [border (in-list borders)]
-                              [col-border (in-list col-borders)])
-                           (when (or left-col-border? (border-left? col-border))
-                             (display (if (and (or left-border? (border-left? border))
-                                               (not (eq? col 'cont)))
-                                          "|"
-                                          " ")))
-                           (let ([col (if (eq? col 'cont) "" col)])
-                             (define gap (max 0 (- w (string-length col))))
-                             (case align
-                               [(right) (display (make-string gap #\space))]
-                               [(center) (display (make-string (quotient gap 2) #\space))])
-                             (display col)
-                             (case align
-                               [(left) (display (make-string gap #\space))]
-                               [(center) (display (make-string (- gap (quotient gap 2)) #\space))]))
-                           (values (border-right? border)
-                                   (border-right? col-border))))
-                       (when end-col-border?
-                         (display (if end-border? "|" " ")))
-                       (newline)
-                       #t)))
-                 borders)))
-
-            (show-row-border last-borders (map (lambda (b) '#(#f #f #f #f)) last-borders))
-
-            null)))
+                  (define-values (end-border? end-col-border?)
+                    (for/fold ([left-border? #f] [left-col-border? #f])
+                              ([col (in-list sub-row)]
+                               [w (in-list widths)]
+                               [align (in-list aligns)]
+                               [border (in-list borders)]
+                               [col-border (in-list col-borders)])
+                      (when (or left-col-border? (border-left? col-border))
+                        (display (if (and (or left-border? (border-left? border))
+                                          (not (eq? col 'cont)))
+                                     "|"
+                                     " ")))
+                      (let ([col (if (eq? col 'cont) "" col)])
+                        (define gap (max 0 (- w (string-length col))))
+                        (case align
+                          [(right) (display (make-string gap #\space))]
+                          [(center) (display (make-string (quotient gap 2) #\space))])
+                        (display col)
+                        (case align
+                          [(left) (display (make-string gap #\space))]
+                          [(center) (display (make-string (- gap (quotient gap 2)) #\space))]))
+                      (values (border-right? border)
+                              (border-right? col-border))))
+                  (when end-col-border?
+                    (display (if end-border? "|" " ")))
+                  (newline)
+                  #t))
+              borders)))
+         (show-row-border last-borders (map (lambda (b) '#(#f #f #f #f)) last-borders))
+         null]))
 
     (define/override (render-itemization i part ht)
-      (let ([flows (itemization-blockss i)])
-        (if (null? flows)
-            null
-            (append*
-             (begin (printf "* ")
-                    (parameterize ([current-indent (make-indent 2)])
-                      (render-flow (car flows) part ht #t)))
-             (for/list ([d (in-list (cdr flows))])
-               (indented-newline)
-               (printf "* ")
-               (parameterize ([current-indent (make-indent 2)])
-                 (render-flow d part ht #f)))))))
+      (define flows (itemization-blockss i))
+      (if (null? flows)
+          null
+          (append*
+           (begin (printf "* ")
+                  (parameterize ([current-indent (make-indent 2)])
+                    (render-flow (car flows) part ht #t)))
+           (for/list ([d (in-list (cdr flows))])
+             (indented-newline)
+             (printf "* ")
+             (parameterize ([current-indent (make-indent 2)])
+               (render-flow d part ht #f))))))
 
     (define/override (render-paragraph p part ri)
       (define o (open-output-string))
@@ -259,11 +265,13 @@
       null)
 
     (define/override (render-content i part ri)
-      (if (and (element? i)
-               (let ([s (element-style i)])
-                 (or (eq? 'hspace s)
-                     (and (style? s)
-                          (eq? 'hspace (style-name s))))))
+      (if (cond
+            [(not (element? i)) #f]
+            [else
+             (define s (element-style i))
+             (or (eq? 'hspace s)
+                 (and (style? s)
+                      (eq? 'hspace (style-name s))))])
           (parameterize ([current-preserve-spaces #t])
             (super render-content i part ri))
           (super render-content i part ri)))
@@ -271,12 +279,14 @@
     (define/override (render-nested-flow i part ri starting-item?)
       (define s (nested-flow-style i))
       (unless (memq 'decorative (style-properties s))
-        (if (and s (or (eq? (style-name s) 'inset)
-                       (eq? (style-name s) 'code-inset)))
-            (begin (printf "  ")
-                   (parameterize ([current-indent (make-indent 2)])
-                     (super render-nested-flow i part ri starting-item?)))
-            (super render-nested-flow i part ri starting-item?))))
+        (cond
+          [(and s (or (eq? (style-name s) 'inset)
+                      (eq? (style-name s) 'code-inset)))
+           (printf "  ")
+           (parameterize ([current-indent (make-indent 2)])
+             (super render-nested-flow i part ri starting-item?))]
+          [else
+           (super render-nested-flow i part ri starting-item?)])))
 
     (define/override (render-other i part ht)
       (cond
