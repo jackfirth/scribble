@@ -70,22 +70,21 @@
   (define file* (if (equal? file default-file) "" file))
   (define roots (current-url-roots))
   (define (find-root path mode)
-    (ormap (lambda (root+url+flags)
-             (let loop ([r (car root+url+flags)] [p path])
-               (if (pair? r)
-                 (and (pair? p) (equal? (car p) (car r))
-                      (loop (cdr r) (cdr p)))
-                 (case mode
-                   [(get-path) `(,(cadr root+url+flags) 
-                                 ,@p 
-                                 ,(if (and (equal? file* "")
-                                           (memq 'index (cddr root+url+flags)))
-                                      default-file
-                                      file*))]
-                   [(get-abs-or-true)
-                    (if (memq 'abs (cddr root+url+flags)) `("" ,@p) #t)]
-                   [else (error 'relativize "internal error: ~e" mode)]))))
-           roots))
+    (for/or ([root+url+flags (in-list roots)])
+      (let loop ([r (car root+url+flags)] [p path])
+        (if (pair? r)
+            (and (pair? p) (equal? (car p) (car r))
+                 (loop (cdr r) (cdr p)))
+            (case mode
+              [(get-path) `(,(cadr root+url+flags) 
+                            ,@p 
+                            ,(if (and (equal? file* "")
+                                      (memq 'index (cddr root+url+flags)))
+                                 default-file
+                                 file*))]
+              [(get-abs-or-true)
+               (if (memq 'abs (cddr root+url+flags)) `("" ,@p) #t)]
+              [else (error 'relativize "internal error: ~e" mode)])))))
   (define result
     (let loop ([t tgtdir] [c curdir] [pfx '()])
       (cond
@@ -165,9 +164,12 @@
     (define t (make-hash))
     (define-syntax-rule (S body) (call-with-semaphore s (lambda () body)))
     (values (lambda (path renderer)
-              (S (if (hash-ref t path #f)
-                   (error 'resource "path used for two resources: ~e" path)
-                   (begin (hash-set! t path #t) (set! l (cons renderer l))))))
+              (S (cond
+                   [(hash-ref t path #f)
+                    (error 'resource "path used for two resources: ~e" path)]
+                   [else
+                    (hash-set! t path #t)
+                    (set! l (cons renderer l))])))
             (lambda () (S (begin0 (reverse l) (set! l '())))))))
 
 ;; `#:exists' determines what happens when the render destination exists, it
@@ -191,21 +193,23 @@
       (values l (car r))))
   (define (render)
     (let loop ([ps dirpathlist])
-      (if (pair? ps)
-        (begin (unless (directory-exists? (car ps))
-                 (if (or (file-exists? (car ps)) (link-exists? (car ps)))
-                   (bad "exists as a file/link")
-                   (make-directory (car ps))))
-               (parameterize ([current-directory (car ps)])
-                 (loop (cdr ps))))
-        (begin (cond [(not exists)] ; do nothing
-                     [(or (file-exists? filename) (link-exists? filename))
-                      (delete-file filename)]
-                     [(directory-exists? filename)
-                      (bad "exists as directory")])
-               (parameterize ([rendered-dirpath dirpathlist])
-                 (printf "  ~a\n" path)
-                 (renderer filename))))))
+      (cond
+        [(pair? ps)
+         (unless (directory-exists? (car ps))
+           (if (or (file-exists? (car ps)) (link-exists? (car ps)))
+               (bad "exists as a file/link")
+               (make-directory (car ps))))
+         (parameterize ([current-directory (car ps)])
+           (loop (cdr ps)))]
+        [else
+         (cond [(not exists)] ; do nothing
+               [(or (file-exists? filename) (link-exists? filename))
+                (delete-file filename)]
+               [(directory-exists? filename)
+                (bad "exists as directory")])
+         (parameterize ([rendered-dirpath dirpathlist])
+           (printf "  ~a\n" path)
+           (renderer filename))])))
   (define absolute-url
     (lazy (define url (relativize filename dirpathlist '()))
           (if (url-roots)
